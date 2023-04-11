@@ -3,6 +3,8 @@ import { Program } from "@project-serum/anchor"
 import { AnchorToken } from "../target/types/anchor_token"
 import * as spl from "@solana/spl-token"
 import { assert } from "chai"
+import { Metaplex } from "@metaplex-foundation/js"
+import { PROGRAM_ID as TOKEN_METADATA_PROGRAM_ID } from "@metaplex-foundation/mpl-token-metadata"
 
 describe("anchor-token", () => {
   // Configure the client to use the local cluster.
@@ -11,6 +13,7 @@ describe("anchor-token", () => {
   const program = anchor.workspace.AnchorToken as Program<AnchorToken>
   const wallet = anchor.workspace.AnchorToken.provider.wallet
   const connection = program.provider.connection
+  const metaplex = Metaplex.make(connection)
 
   const [rewardTokenMintPda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("reward")],
@@ -27,11 +30,27 @@ describe("anchor-token", () => {
     wallet.publicKey
   )
 
+  // test token metadata
+  const metadata = {
+    uri: "https://arweave.net/h19GMcMz7RLDY7kAHGWeWolHTmO83mLLMNPzEkF32BQ",
+    name: "NAME",
+    symbol: "SYMBOL",
+  }
+
   it("Initialize New Token Mint", async () => {
+    const rewardTokenMintMetadataPDA = await metaplex
+      .nfts()
+      .pdas()
+      .metadata({ mint: rewardTokenMintPda })
+
     // Add your test here.
     const tx = await program.methods
-      .createMint()
-      .accounts({ rewardTokenMint: rewardTokenMintPda })
+      .createMint(metadata.uri, metadata.name, metadata.symbol)
+      .accounts({
+        rewardTokenMint: rewardTokenMintPda,
+        metadataAccount: rewardTokenMintMetadataPDA,
+        tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
+      })
       .rpc()
     console.log("Your transaction signature", tx)
   })

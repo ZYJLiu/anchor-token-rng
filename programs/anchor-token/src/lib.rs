@@ -1,17 +1,54 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
+    metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata},
     token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
 };
+use mpl_token_metadata::{pda::find_metadata_account, state::DataV2};
 
-declare_id!("5iAVPXH9djWQbviQXbYvicsxums6Nf8zGiitGwGWu6QQ");
+declare_id!("CCLnXJAJYFjCHLCugpBCEQKrpiSApiRM4UxkBUHJRrv4");
 
 #[program]
 pub mod anchor_token {
     use super::*;
 
     // Create new token mint with PDA as mint authority
-    pub fn create_mint(_ctx: Context<CreateMint>) -> Result<()> {
+    pub fn create_mint(
+        ctx: Context<CreateMint>,
+        uri: String,
+        name: String,
+        symbol: String,
+    ) -> Result<()> {
+        // create metadata account for token mint
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"reward", &[*ctx.bumps.get("reward_token_mint").unwrap()]]];
+        create_metadata_accounts_v3(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_metadata_program.to_account_info(),
+                CreateMetadataAccountsV3 {
+                    metadata: ctx.accounts.metadata_account.to_account_info(),
+                    mint: ctx.accounts.reward_token_mint.to_account_info(),
+                    mint_authority: ctx.accounts.reward_token_mint.to_account_info(),
+                    update_authority: ctx.accounts.reward_token_mint.to_account_info(),
+                    payer: ctx.accounts.signer.to_account_info(),
+                    system_program: ctx.accounts.system_program.to_account_info(),
+                    rent: ctx.accounts.rent.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            DataV2 {
+                name: name,
+                symbol: symbol,
+                uri: uri,
+                seller_fee_basis_points: 0,
+                creators: None,
+                collection: None,
+                uses: None,
+            },
+            true,
+            true,
+            None,
+        )?;
         Ok(())
     }
 
@@ -89,8 +126,18 @@ pub struct CreateMint<'info> {
 
     )]
     pub reward_token_mint: Account<'info, Mint>,
-    pub system_program: Program<'info, System>,
+
+    ///CHECK:
+    #[account(
+        mut,
+        address=find_metadata_account(&reward_token_mint.key()).0
+    )]
+    pub metadata_account: UncheckedAccount<'info>,
+
     pub token_program: Program<'info, Token>,
+    pub token_metadata_program: Program<'info, Metadata>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
