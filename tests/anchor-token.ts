@@ -25,6 +25,11 @@ describe("anchor-token", () => {
     program.programId
   )
 
+  const [playerPDA] = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("player"), wallet.publicKey.toBuffer()],
+    program.programId
+  )
+
   const playerTokenAccount = spl.getAssociatedTokenAddressSync(
     rewardTokenMintPda,
     wallet.publicKey
@@ -55,10 +60,25 @@ describe("anchor-token", () => {
     console.log("Your transaction signature", tx)
   })
 
+  it("Init Player", async () => {
+    // Add your test here.
+    const tx = await program.methods
+      .initPlayer()
+      .accounts({
+        player: playerPDA,
+        signer: wallet.publicKey,
+      })
+      .rpc()
+    console.log("Your transaction signature", tx)
+
+    const player = await program.account.playerData.fetch(playerPDA)
+    assert(player.health === 100)
+  })
+
   it("Mint Tokens", async () => {
     // Add your test here.
     const tx = await program.methods
-      .mintTokens(new anchor.BN(1_000_000_000))
+      .mintTokens()
       .accounts({
         playerTokenAccount: playerTokenAccount,
         rewardTokenMint: rewardTokenMintPda,

@@ -5,8 +5,12 @@ use anchor_spl::{
     token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
 };
 use mpl_token_metadata::{pda::find_metadata_account, state::DataV2};
+use solana_program::{pubkey, pubkey::Pubkey};
 
 declare_id!("CCLnXJAJYFjCHLCugpBCEQKrpiSApiRM4UxkBUHJRrv4");
+
+const ADMIN_PUBKEY: Pubkey = pubkey!("DfLZV18rD7wCQwjYvhTFwuvLh49WSbXFeJFPQb5czifH");
+const MAX_HEALTH: u8 = 100;
 
 #[program]
 pub mod anchor_token {
@@ -19,44 +23,61 @@ pub mod anchor_token {
         name: String,
         symbol: String,
     ) -> Result<()> {
-        // create metadata account for token mint
-        let signer_seeds: &[&[&[u8]]] =
-            &[&[b"reward", &[*ctx.bumps.get("reward_token_mint").unwrap()]]];
-        create_metadata_accounts_v3(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_metadata_program.to_account_info(),
-                CreateMetadataAccountsV3 {
-                    metadata: ctx.accounts.metadata_account.to_account_info(),
-                    mint: ctx.accounts.reward_token_mint.to_account_info(),
-                    mint_authority: ctx.accounts.reward_token_mint.to_account_info(),
-                    update_authority: ctx.accounts.reward_token_mint.to_account_info(),
-                    payer: ctx.accounts.signer.to_account_info(),
-                    system_program: ctx.accounts.system_program.to_account_info(),
-                    rent: ctx.accounts.rent.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            DataV2 {
-                name: name,
-                symbol: symbol,
-                uri: uri,
-                seller_fee_basis_points: 0,
-                creators: None,
-                collection: None,
-                uses: None,
+        // PDA seeds and bump to "sign" for CPI
+        let seeds = b"reward";
+        let bump = *ctx.bumps.get("reward_token_mint").unwrap();
+        let signer: &[&[&[u8]]] = &[&[seeds, &[bump]]];
+
+        // On-chain token metadata for the mint
+        let data_v2 = DataV2 {
+            name: name,
+            symbol: symbol,
+            uri: uri,
+            seller_fee_basis_points: 0,
+            creators: None,
+            collection: None,
+            uses: None,
+        };
+
+        // CPI Context
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_metadata_program.to_account_info(),
+            CreateMetadataAccountsV3 {
+                metadata: ctx.accounts.metadata_account.to_account_info(), // the metadata account being created
+                mint: ctx.accounts.reward_token_mint.to_account_info(), // the mint account of the metadata account
+                mint_authority: ctx.accounts.reward_token_mint.to_account_info(), // the mint authority of the mint account
+                update_authority: ctx.accounts.reward_token_mint.to_account_info(), // the update authority of the metadata account
+                payer: ctx.accounts.admin.to_account_info(), // the payer for creating the metadata account
+                system_program: ctx.accounts.system_program.to_account_info(), // the system program account
+                rent: ctx.accounts.rent.to_account_info(), // the rent sysvar account
             },
-            true,
-            true,
-            None,
+            signer,
+        );
+
+        create_metadata_accounts_v3(
+            cpi_ctx, // cpi context
+            data_v2, // token metadata
+            true,    // is_mutable
+            true,    // update_authority_is_signer
+            None,    // collection details
         )?;
+
+        Ok(())
+    }
+
+    pub fn init_player(ctx: Context<InitPlayer>) -> Result<()> {
+        ctx.accounts.player.health = MAX_HEALTH;
         Ok(())
     }
 
     // Mint tokens to player token account
-    pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
-        let signer_seeds: &[&[&[u8]]] =
-            &[&[b"reward", &[*ctx.bumps.get("reward_token_mint").unwrap()]]];
+    pub fn mint_tokens(ctx: Context<MintTokens>) -> Result<()> {
+        // PDA seeds and bump to "sign" for CPI
+        let seeds = b"reward";
+        let bump = *ctx.bumps.get("reward_token_mint").unwrap();
+        let signer: &[&[&[u8]]] = &[&[seeds, &[bump]]];
 
+        // CPI Context
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             MintTo {
@@ -64,8 +85,13 @@ pub mod anchor_token {
                 to: ctx.accounts.player_token_account.to_account_info(),
                 authority: ctx.accounts.reward_token_mint.to_account_info(),
             },
-            signer_seeds,
+            signer,
         );
+
+        // Mint 1 token, accounting for decimals of mint
+        let amount = (1u64)
+            .checked_mul(10u64.pow(ctx.accounts.reward_token_mint.decimals as u32))
+            .unwrap();
 
         mint_to(cpi_ctx, amount)?;
         Ok(())
@@ -112,15 +138,18 @@ pub mod anchor_token {
 
 #[derive(Accounts)]
 pub struct CreateMint<'info> {
-    #[account(mut)]
-    pub signer: Signer<'info>,
+    #[account(
+        mut,
+        address = ADMIN_PUBKEY
+    )]
+    pub admin: Signer<'info>,
 
     // The PDA is both the address of the mint account and the mint authority
     #[account(
         init,
         seeds = [b"reward"],
         bump,
-        payer = signer,
+        payer = admin,
         mint::decimals = 9,
         mint::authority = reward_token_mint,
 
@@ -138,6 +167,21 @@ pub struct CreateMint<'info> {
     pub token_metadata_program: Program<'info, Metadata>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct InitPlayer<'info> {
+    #[account(
+        init,
+        payer = signer,
+        space = 8 + 8,
+        seeds = [b"player".as_ref(), signer.key().as_ref()],
+        bump,
+    )]
+    pub player: Account<'info, PlayerData>,
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -234,4 +278,9 @@ pub struct WithdrawTokens<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+}
+
+#[account]
+pub struct PlayerData {
+    pub health: u8,
 }
