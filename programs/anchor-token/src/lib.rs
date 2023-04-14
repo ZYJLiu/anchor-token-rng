@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata},
-    token::{mint_to, transfer, Mint, MintTo, Token, TokenAccount, Transfer},
+    token::{burn, mint_to, Burn, Mint, MintTo, Token, TokenAccount},
 };
 use mpl_token_metadata::{pda::find_metadata_account, state::DataV2};
 use solana_program::{pubkey, pubkey::Pubkey};
@@ -11,6 +11,12 @@ declare_id!("CCLnXJAJYFjCHLCugpBCEQKrpiSApiRM4UxkBUHJRrv4");
 
 const ADMIN_PUBKEY: Pubkey = pubkey!("DfLZV18rD7wCQwjYvhTFwuvLh49WSbXFeJFPQb5czifH");
 const MAX_HEALTH: u8 = 100;
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("Not enough health")]
+    NotEnoughHealth,
+}
 
 #[program]
 pub mod anchor_token {
@@ -65,13 +71,21 @@ pub mod anchor_token {
         Ok(())
     }
 
+    // Create new player account
     pub fn init_player(ctx: Context<InitPlayer>) -> Result<()> {
-        ctx.accounts.player.health = MAX_HEALTH;
+        ctx.accounts.player_data.health = MAX_HEALTH;
         Ok(())
     }
 
     // Mint tokens to player token account
-    pub fn mint_tokens(ctx: Context<MintTokens>) -> Result<()> {
+    pub fn kill_enemy(ctx: Context<KillEnemy>) -> Result<()> {
+        // Check if player has enough health
+        if ctx.accounts.player_data.health == 0 {
+            return err!(ErrorCode::NotEnoughHealth);
+        }
+        // Subtract 10 health from player
+        ctx.accounts.player_data.health = ctx.accounts.player_data.health.checked_sub(10).unwrap();
+
         // PDA seeds and bump to "sign" for CPI
         let seeds = b"reward";
         let bump = *ctx.bumps.get("reward_token_mint").unwrap();
@@ -97,41 +111,26 @@ pub mod anchor_token {
         Ok(())
     }
 
-    // Deposit tokens from player token account to vault token account
-    pub fn deposit_tokens(ctx: Context<DepositTokens>, amount: u64) -> Result<()> {
+    // Burn Token to health player
+    pub fn heal(ctx: Context<Heal>) -> Result<()> {
+        ctx.accounts.player_data.health = MAX_HEALTH;
+
+        // CPI Context
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
-            Transfer {
+            Burn {
+                mint: ctx.accounts.reward_token_mint.to_account_info(),
                 from: ctx.accounts.player_token_account.to_account_info(),
-                to: ctx.accounts.vault_token_account.to_account_info(),
                 authority: ctx.accounts.player.to_account_info(),
             },
         );
 
-        transfer(cpi_ctx, amount)?;
-        Ok(())
-    }
+        // Burn 1 token, accounting for decimals of mint
+        let amount = (1u64)
+            .checked_mul(10u64.pow(ctx.accounts.reward_token_mint.decimals as u32))
+            .unwrap();
 
-    // Withdraw tokens from vault token account to player token account
-    pub fn withdraw_tokens(ctx: Context<WithdrawTokens>, amount: u64) -> Result<()> {
-        let reward_token_mint = ctx.accounts.reward_token_mint.key();
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"vault",
-            reward_token_mint.as_ref(),
-            &[*ctx.bumps.get("vault_token_account").unwrap()],
-        ]];
-
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.vault_token_account.to_account_info(),
-                to: ctx.accounts.player_token_account.to_account_info(),
-                authority: ctx.accounts.vault_token_account.to_account_info(),
-            },
-            signer_seeds,
-        );
-
-        transfer(cpi_ctx, amount)?;
+        burn(cpi_ctx, amount)?;
         Ok(())
     }
 }
@@ -156,7 +155,7 @@ pub struct CreateMint<'info> {
     )]
     pub reward_token_mint: Account<'info, Mint>,
 
-    ///CHECK:
+    ///CHECK: Using "address" constraint to validate metadata account address
     #[account(
         mut,
         address=find_metadata_account(&reward_token_mint.key()).0
@@ -173,21 +172,28 @@ pub struct CreateMint<'info> {
 pub struct InitPlayer<'info> {
     #[account(
         init,
-        payer = signer,
+        payer = player,
         space = 8 + 8,
-        seeds = [b"player".as_ref(), signer.key().as_ref()],
+        seeds = [b"player".as_ref(), player.key().as_ref()],
         bump,
     )]
-    pub player: Account<'info, PlayerData>,
+    pub player_data: Account<'info, PlayerData>,
     #[account(mut)]
-    pub signer: Signer<'info>,
+    pub player: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct MintTokens<'info> {
+pub struct KillEnemy<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"player".as_ref(), player.key().as_ref()],
+        bump,
+    )]
+    pub player_data: Account<'info, PlayerData>,
 
     // Initialize player token account if it doesn't exist
     #[account(
@@ -211,11 +217,17 @@ pub struct MintTokens<'info> {
 }
 
 #[derive(Accounts)]
-pub struct DepositTokens<'info> {
+pub struct Heal<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
 
-    // Player token account
+    #[account(
+        mut,
+        seeds = [b"player".as_ref(), player.key().as_ref()],
+        bump,
+    )]
+    pub player_data: Account<'info, PlayerData>,
+
     #[account(
         mut,
         associated_token::mint = reward_token_mint,
@@ -223,53 +235,8 @@ pub struct DepositTokens<'info> {
     )]
     pub player_token_account: Account<'info, TokenAccount>,
 
-    // Initialize vault token account if it doesn't exist
-    // The PDA is both the address of the token account and the token account authority
-    #[account(
-        init_if_needed,
-        seeds = [b"vault", reward_token_mint.key().as_ref()],
-        bump,
-        payer = player,
-        token::mint=reward_token_mint,
-        token::authority=vault_token_account,
-    )]
-    pub vault_token_account: Account<'info, TokenAccount>,
-
-    #[account(
-        seeds = [b"reward"],
-        bump,
-    )]
-    pub reward_token_mint: Account<'info, Mint>,
-
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct WithdrawTokens<'info> {
-    #[account(mut)]
-    pub player: Signer<'info>,
-
-    // Initialize player token account if it doesn't exist
-    #[account(
-        init_if_needed,
-        payer = player,
-        associated_token::mint = reward_token_mint,
-        associated_token::authority = player
-    )]
-    pub player_token_account: Account<'info, TokenAccount>,
-
     #[account(
         mut,
-        seeds = [b"vault", reward_token_mint.key().as_ref()],
-        bump,
-        token::mint=reward_token_mint,
-        token::authority=vault_token_account,
-    )]
-    pub vault_token_account: Account<'info, TokenAccount>,
-
-    #[account(
         seeds = [b"reward"],
         bump,
     )]
@@ -277,7 +244,6 @@ pub struct WithdrawTokens<'info> {
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
-    pub system_program: Program<'info, System>,
 }
 
 #[account]

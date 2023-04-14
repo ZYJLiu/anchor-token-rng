@@ -20,11 +20,6 @@ describe("anchor-token", () => {
     program.programId
   )
 
-  const [vaultTokenAccountPda] = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), rewardTokenMintPda.toBuffer()],
-    program.programId
-  )
-
   const [playerPDA] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("player"), wallet.publicKey.toBuffer()],
     program.programId
@@ -37,9 +32,9 @@ describe("anchor-token", () => {
 
   // test token metadata
   const metadata = {
-    uri: "https://arweave.net/h19GMcMz7RLDY7kAHGWeWolHTmO83mLLMNPzEkF32BQ",
-    name: "NAME",
-    symbol: "SYMBOL",
+    uri: "https://raw.githubusercontent.com/solana-developers/program-examples/new-examples/tokens/tokens/.assets/spl-token.json",
+    name: "Solana Gold",
+    symbol: "GOLDSOL",
   }
 
   it("Initialize New Token Mint", async () => {
@@ -56,8 +51,11 @@ describe("anchor-token", () => {
         metadataAccount: rewardTokenMintMetadataPDA,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
       })
-      .rpc()
+      .rpc({ skipPreflight: true })
     console.log("Your transaction signature", tx)
+
+    // const mint = await spl.getMint(connection, rewardTokenMintPda)
+    // console.log("Mint", mint.decimals)
   })
 
   it("Init Player", async () => {
@@ -65,27 +63,27 @@ describe("anchor-token", () => {
     const tx = await program.methods
       .initPlayer()
       .accounts({
-        player: playerPDA,
-        signer: wallet.publicKey,
+        playerData: playerPDA,
+        player: wallet.publicKey,
       })
       .rpc()
     console.log("Your transaction signature", tx)
 
-    const player = await program.account.playerData.fetch(playerPDA)
-    assert(player.health === 100)
+    const playerData = await program.account.playerData.fetch(playerPDA)
+    assert(playerData.health === 100)
   })
 
-  it("Mint Tokens", async () => {
+  it("Kill Enemy to Mint 1 Token", async () => {
     // Add your test here.
     const tx = await program.methods
-      .mintTokens()
+      .killEnemy()
       .accounts({
+        playerData: playerPDA,
         playerTokenAccount: playerTokenAccount,
         rewardTokenMint: rewardTokenMintPda,
       })
       .rpc()
     console.log("Your transaction signature", tx)
-
     assert.strictEqual(
       Number(
         (await connection.getTokenAccountBalance(playerTokenAccount)).value
@@ -93,20 +91,22 @@ describe("anchor-token", () => {
       ),
       1_000_000_000
     )
+
+    const playerData = await program.account.playerData.fetch(playerPDA)
+    assert(playerData.health === 90)
   })
 
-  it("Deposit Tokens", async () => {
+  it("Burn 1 Token to Heal", async () => {
     // Add your test here.
     const tx = await program.methods
-      .depositTokens(new anchor.BN(1_000_000_000))
+      .heal()
       .accounts({
+        playerData: playerPDA,
         playerTokenAccount: playerTokenAccount,
-        vaultTokenAccount: vaultTokenAccountPda,
         rewardTokenMint: rewardTokenMintPda,
       })
       .rpc()
     console.log("Your transaction signature", tx)
-
     assert.strictEqual(
       Number(
         (await connection.getTokenAccountBalance(playerTokenAccount)).value
@@ -115,41 +115,7 @@ describe("anchor-token", () => {
       0
     )
 
-    assert.strictEqual(
-      Number(
-        (await connection.getTokenAccountBalance(vaultTokenAccountPda)).value
-          .amount
-      ),
-      1_000_000_000
-    )
-  })
-
-  it("Withdraw Tokens", async () => {
-    // Add your test here.
-    const tx = await program.methods
-      .withdrawTokens(new anchor.BN(1_000_000_000))
-      .accounts({
-        playerTokenAccount: playerTokenAccount,
-        vaultTokenAccount: vaultTokenAccountPda,
-        rewardTokenMint: rewardTokenMintPda,
-      })
-      .rpc()
-    console.log("Your transaction signature", tx)
-
-    assert.strictEqual(
-      Number(
-        (await connection.getTokenAccountBalance(playerTokenAccount)).value
-          .amount
-      ),
-      1_000_000_000
-    )
-
-    assert.strictEqual(
-      Number(
-        (await connection.getTokenAccountBalance(vaultTokenAccountPda)).value
-          .amount
-      ),
-      0
-    )
+    const playerData = await program.account.playerData.fetch(playerPDA)
+    assert(playerData.health === 100)
   })
 })
