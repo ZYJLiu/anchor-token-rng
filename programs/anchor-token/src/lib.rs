@@ -83,18 +83,19 @@ pub mod anchor_token {
         if ctx.accounts.player_data.health == 0 {
             return err!(ErrorCode::NotEnoughHealth);
         }
-        // Subtract health from player
+
+        // Calculate random damage
         let slot = Clock::get()?.slot;
         let xorshift_output = xorshift64(slot);
         let random_damage = xorshift_output % (MAX_HEALTH + 1) as u64;
         msg!("Random damage: {}", random_damage);
 
+        // Subtract health from player, min health is 0
         ctx.accounts.player_data.health = ctx
             .accounts
             .player_data
             .health
-            .checked_sub(random_damage as u8)
-            .unwrap();
+            .saturating_sub(random_damage as u8);
 
         // PDA seeds and bump to "sign" for CPI
         let seeds = b"reward";
@@ -184,7 +185,7 @@ pub struct InitPlayer<'info> {
         init,
         payer = player,
         space = 8 + 8,
-        seeds = [b"player".as_ref(), player.key().as_ref()],
+        seeds = [b"player", player.key().as_ref()],
         bump,
     )]
     pub player_data: Account<'info, PlayerData>,
@@ -200,7 +201,7 @@ pub struct KillEnemy<'info> {
 
     #[account(
         mut,
-        seeds = [b"player".as_ref(), player.key().as_ref()],
+        seeds = [b"player", player.key().as_ref()],
         bump,
     )]
     pub player_data: Account<'info, PlayerData>,
@@ -233,7 +234,7 @@ pub struct Heal<'info> {
 
     #[account(
         mut,
-        seeds = [b"player".as_ref(), player.key().as_ref()],
+        seeds = [b"player", player.key().as_ref()],
         bump,
     )]
     pub player_data: Account<'info, PlayerData>,

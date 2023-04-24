@@ -15,7 +15,7 @@ describe("anchor-token", () => {
   const connection = program.provider.connection
   const metaplex = Metaplex.make(connection)
 
-  const [rewardTokenMintPda] = anchor.web3.PublicKey.findProgramAddressSync(
+  const [rewardTokenMintPDA] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("reward")],
     program.programId
   )
@@ -26,7 +26,7 @@ describe("anchor-token", () => {
   )
 
   const playerTokenAccount = spl.getAssociatedTokenAddressSync(
-    rewardTokenMintPda,
+    rewardTokenMintPDA,
     wallet.publicKey
   )
 
@@ -41,13 +41,13 @@ describe("anchor-token", () => {
     const rewardTokenMintMetadataPDA = await metaplex
       .nfts()
       .pdas()
-      .metadata({ mint: rewardTokenMintPda })
+      .metadata({ mint: rewardTokenMintPDA })
 
     // Add your test here.
     const tx = await program.methods
       .createMint(metadata.uri, metadata.name, metadata.symbol)
       .accounts({
-        rewardTokenMint: rewardTokenMintPda,
+        rewardTokenMint: rewardTokenMintPDA,
         metadataAccount: rewardTokenMintMetadataPDA,
         tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
       })
@@ -80,17 +80,17 @@ describe("anchor-token", () => {
       .accounts({
         playerData: playerPDA,
         playerTokenAccount: playerTokenAccount,
-        rewardTokenMint: rewardTokenMintPda,
+        rewardTokenMint: rewardTokenMintPDA,
       })
       .rpc()
     console.log("Your transaction signature", tx)
-    // assert.strictEqual(
-    //   Number(
-    //     (await connection.getTokenAccountBalance(playerTokenAccount)).value
-    //       .amount
-    //   ),
-    //   1_000_000_000
-    // )
+    assert.strictEqual(
+      Number(
+        (await connection.getTokenAccountBalance(playerTokenAccount)).value
+          .amount
+      ),
+      1_000_000_000
+    )
 
     const playerData = await program.account.playerData.fetch(playerPDA)
     console.log("Player Health: ", playerData.health)
@@ -103,7 +103,7 @@ describe("anchor-token", () => {
       .accounts({
         playerData: playerPDA,
         playerTokenAccount: playerTokenAccount,
-        rewardTokenMint: rewardTokenMintPda,
+        rewardTokenMint: rewardTokenMintPDA,
       })
       .rpc()
     console.log("Your transaction signature", tx)
