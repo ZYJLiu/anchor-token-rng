@@ -16,9 +16,7 @@ cpi = ["no-entrypoint"]
 default = []
 
 [dependencies]
-anchor-lang = { version = "0.27.0", features = ["init-if-needed"] }
-anchor-spl = {version = "0.27.0",features = ["metadata"]}
+anchor-lang = { version = "0.26.0", features = ["init-if-needed"] }
+anchor-spl = {version = "0.26.0",features = ["metadata"]}
 mpl-token-metadata = { version="1.8.3", features = [ "no-entrypoint" ] }
-solana-program = "~1.14.0"
-switchboard-v2 = "^0.1.23"
-bytemuck = "1.7.2"
+solana-program = "*"
